@@ -115,6 +115,49 @@ if __name__ == "__main__":
         err = C0_bvp.distance(us, exact_bvp)
         print(f"  ||u - x(1-x)/2||_L2 = {err:.2e}")
 
+    # -- PDE: heat equation u_t = u_xx via implicit Euler + Fix --
+    # (I - dt*d^2/dx^2) u^{n+1} = u^n  rewritten via Green's K = (-d^2/dx^2)^{-1}:
+    #   u + alpha*K[u] = alpha*K[u^n],  alpha = 1/dt
+    #   A[u] = u + alpha*K[u] - alpha*K[u^n] = 0
+    dt = 0.1
+    alpha = 1.0 / dt  # = 10
+    n_steps = 3
+    C0 = SPACE_C0(0.0, 1.0)
+
+    # initial condition: u(x,0) = sin(pi*x)
+    u_heat = Fun(lambda x: math.sin(math.pi * x), space=C0, label="u0")
+
+    ux = Var("u"); xx = Var("x"); tt = Var("t")
+    for step in range(n_steps):
+        t_now = dt * (step + 1)
+        u_n = u_heat  # freeze current state as source term
+
+        # K[u^n]: Green integral of known state (constant during this step)
+        K_un = integ(Lam("t", App(u_n, tt)), R(0.0), R(1.0))
+
+        # A[u](x) = u(x) + alpha*K[u](x) - alpha*K[u^n](x)
+        A_heat = Lam("u", Lam("x",
+            sub(add(App(ux, xx),
+                    mul(R(alpha), App(integ(Lam("t", App(ux, tt)), R(0.0), R(1.0)), xx))),
+                mul(R(alpha), App(K_un, xx)))))
+
+        u_heat = show(solve(A_heat, eta=0.5), u_n,
+                      label=f"Heat step {step+1}/{n_steps}, t={t_now:.2f}",
+                      max_iter=100)
+        if u_heat is None: break
+
+    if u_heat:
+        # compare vs exact PDE solution u(x,t) = exp(-pi^2*t)*sin(pi*x)
+        t_final = dt * n_steps
+        exact_heat = Fun(lambda x: math.exp(-math.pi**2 * t_final) * math.sin(math.pi * x),
+                         space=C0)
+        err = C0.distance(u_heat, exact_heat)
+        print(f"  PDE exact vs implicit Euler at t={t_final:.2f}:")
+        print(f"    u_num(0.5)  = {u_heat(0.5):.6f}")
+        print(f"    u_exact(0.5) = {exact_heat(0.5):.6f}")
+        print(f"    ||u - u_exact||_L2 = {err:.2e}")
+        print(f"    (O(dt) temporal error, vanishes as dt->0)")
+
     print(f"\n{'=' * 40}")
     print(f"  (D, C)u = (f, g)  ->  T  ->  Fix(T)  =  solution")
     print(f"{'=' * 40}\n")
