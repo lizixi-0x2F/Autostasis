@@ -5,3 +5,11 @@ __pycache__/
 dist/
 build/
 .ipynb_checkpoints/
+CLAUDE.md
+.claude/
+# LaTeX intermediate files
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out

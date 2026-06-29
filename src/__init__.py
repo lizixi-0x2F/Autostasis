@@ -20,3 +20,6 @@ from .serialize import (
 )
 from .dsl import R, add, sub, mul, pow_, integ, diff_op
 from .solve import T, solve
+from .grad import Tape, TapeVar, tv_dot, tv_mse, tv_sum
+from .nn import Model, FunctionModel, TapeModel
+from .trainer import Trainer

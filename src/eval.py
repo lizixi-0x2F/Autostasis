@@ -130,16 +130,32 @@ def _eval_integ(func: Term, a: Term, b: Term | None, x_val: Term, env: Env) -> T
         return Fun(lambda _, v=float(integral_f(x_float)): v, space=SPACE_R)
 
 
-def _eval_diff(func: Term, x_val: Term, env: Env) -> Term:
-    """App(Diff(func), x_val) -> f'(x) via central finite difference."""
+def _eval_diff(func: Term, x_val: Term, env: Env, h: float = 1e-5) -> Term:
+    """App(Diff(func), x_val) -> f'(x) via central finite difference.
+
+    Fun:   numerical derivative of a Python callable
+    Lam:   symbolic derivative via finite difference on the body
+           ∂(λp.body)/∂p at p=x_val ≈ (body[p:=x+h] - body[p:=x-h]) / 2h
+    """
     x_float = _extract_float(x_val)
     f_term = eval_term(func, env, 0)
     match f_term:
         case Fun() as f:
             deriv = _numerical_derivative(f)
             return Fun(lambda _, v=float(deriv(x_float)): v, space=SPACE_R)
+        case Lam(param, body):
+            # ∂(λp.body)/∂p at p=x_val via central finite difference.
+            # Perturb the parameter by ±h, substitute, evaluate, compute slope.
+            x_plus = Fun(lambda _, v=x_float + h: v, space=SPACE_R)
+            x_minus = Fun(lambda _, v=x_float - h: v, space=SPACE_R)
+            body_plus = substitute(body, param, x_plus)
+            body_minus = substitute(body, param, x_minus)
+            f_plus = _extract_float(eval_term(body_plus, env, 0))
+            f_minus = _extract_float(eval_term(body_minus, env, 0))
+            deriv_val = (f_plus - f_minus) / (2 * h)
+            return Fun(lambda _, v=deriv_val: v, space=SPACE_R)
         case _:
-            raise ValueError(f"Diff requires Fun, got {type(f_term).__name__}")
+            raise ValueError(f"Diff requires Fun or Lam, got {type(f_term).__name__}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
