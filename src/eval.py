@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import numpy as np
 from .terms import (Term, Var, Lam, App, Quote, Eval, Fix, Nat, Domain, Fun,
+                     Function,
                      Prim, PartialPrim, Cons, Integ, Diff, Space, SPACE_R, SPACE_C0)
 from .env import Env
 from .ops import substitute
@@ -104,11 +105,9 @@ def _eval_integ(func: Term, a: Term, b: Term | None, x_val: Term, env: Env) -> T
         match f_term:
             case Fun() as f:
                 integral_f = _numerical_integral(f, a_float)
-            case Lam(_, _) as lam_f:
-                def lam_fn(t, _lam=lam_f):
-                    r = eval_term(App(_lam, Fun(lambda _: t)), env, 0)
-                    return _extract_float(r)
-                f = Fun(lam_fn, space=SPACE_C0(a_float, a_float + 10.0))
+            case Function() as fn:
+                f = Fun(lambda t, _f=fn: _f.eval_at(t, env),
+                        space=SPACE_C0(a_float, a_float + 10.0))
                 integral_f = _numerical_integral(f, a_float)
             case _:
                 raise ValueError(f"Integ IVP needs Fun or Lam integrand, got {type(f_term).__name__}")
@@ -119,11 +118,9 @@ def _eval_integ(func: Term, a: Term, b: Term | None, x_val: Term, env: Env) -> T
         match f_term:
             case Fun() as f:
                 integral_f = _green_integral(f, a_float, b_float)
-            case Lam(_, _) as lam_f:
-                def lam_fn(t, _lam=lam_f):
-                    r = eval_term(App(_lam, Fun(lambda _: t)), env, 0)
-                    return _extract_float(r)
-                f = Fun(lam_fn, space=SPACE_C0(a_float, b_float))
+            case Function() as fn:
+                f = Fun(lambda t, _f=fn: _f.eval_at(t, env),
+                        space=SPACE_C0(a_float, b_float))
                 integral_f = _green_integral(f, a_float, b_float)
             case _:
                 raise ValueError(f"Integ BVP needs Fun or Lam integrand, got{type(f_term).__name__}")
@@ -143,15 +140,10 @@ def _eval_diff(func: Term, x_val: Term, env: Env, h: float = 1e-5) -> Term:
         case Fun() as f:
             deriv = _numerical_derivative(f)
             return Fun(lambda _, v=float(deriv(x_float)): v, space=SPACE_R)
-        case Lam(param, body):
-            # ∂(λp.body)/∂p at p=x_val via central finite difference.
-            # Perturb the parameter by ±h, substitute, evaluate, compute slope.
-            x_plus = Fun(lambda _, v=x_float + h: v, space=SPACE_R)
-            x_minus = Fun(lambda _, v=x_float - h: v, space=SPACE_R)
-            body_plus = substitute(body, param, x_plus)
-            body_minus = substitute(body, param, x_minus)
-            f_plus = _extract_float(eval_term(body_plus, env, 0))
-            f_minus = _extract_float(eval_term(body_minus, env, 0))
+        case Function() as fn:
+            # ∂f/∂x at x_val via central finite difference on eval_at
+            f_plus = fn.eval_at(x_float + h, env)
+            f_minus = fn.eval_at(x_float - h, env)
             deriv_val = (f_plus - f_minus) / (2 * h)
             return Fun(lambda _, v=deriv_val: v, space=SPACE_R)
         case _:
@@ -261,22 +253,16 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
                         sv = eval_term(stored, env, _fd)
                         av = eval_term(arg, env, _fd)
                         match (sv, av):
-                            case (Fun() as f, Fun() as g):
-                                term = Fun(lambda x, _f=f, _g=g:
-                                           _f(x) / _g(x) if _g(x) != 0 else float("inf"),
-                                           space=f.space)
-                            case (Fun() as f, Lam(p, body)):
-                                g = _compile_lam(Lam(p, body), f.space, env)
-                                term = Fun(lambda x, _f=f, _g=g:
-                                           _f(x) / _g(x) if _g(x) != 0 else float("inf"),
-                                           space=f.space)
-                            case (Lam(p, body), Fun() as g):
-                                f_compiled = _compile_lam(Lam(p, body), g.space, env)
-                                term = Fun(lambda x, _f=f_compiled, _g=g:
-                                           _f(x) / _g(x) if _g(x) != 0 else float("inf"),
-                                           space=g.space)
-                            case (Lam(p1, b1), Lam(p2, b2)) if p1 == p2:
-                                term = Lam(p1, App(App(Prim("divf"), b1), b2))
+                            case (Function() as f, Function() as g):
+                                # Symbolic Lam×Lam with matching param: push into body
+                                if isinstance(f, Lam) and isinstance(g, Lam) and f.param == g.param:
+                                    term = Lam(f.param, App(App(Prim("divf"), f.body), g.body))
+                                else:
+                                    f_num = _to_numerical(f, g.space, env)
+                                    g_num = _to_numerical(g, f.space, env)
+                                    term = Fun(lambda x, _f=f_num, _g=g_num:
+                                               _f(x) / _g(x) if _g(x) != 0 else float("inf"),
+                                               space=f.space)
                             case _: return App(App(Prim("divf"), sv), av)
                     case PartialPrim("powf", stored):
                         sv = eval_term(stored, env, _fd)
@@ -510,11 +496,8 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
 # Lam → Fun compilation (single-shot sampling, eliminates per-point eval_term)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _compile_lam(lam: Lam, space: Space, env: Env, n: int = 100) -> Fun:
-    """Compile a Lam into a numerical Fun (interpolated sampling) in one shot; subsequent calls no longer trigger eval_term.
-
-    If space has no domain (scalar R), fall back to default domain [0,1] — functional Lam is always compiled as a function.
-    """
+def _compile_lam(lam: Function, space: Space, env: Env, n: int = 100) -> Fun:
+    """Compile a symbolic Function (Lam) into a numerical Fun (interpolated sampling)."""
     dom = space.domain or Domain(0.0, 1.0)
     xs = np.linspace(dom.a, dom.b, n)
     ys = np.array([_extract_float(
@@ -524,35 +507,38 @@ def _compile_lam(lam: Lam, space: Space, env: Env, n: int = 100) -> Fun:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Function conversion helper
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _to_numerical(f: Function, target_space: Space, env: Env) -> Fun:
+    """Convert a Function to a numerical Fun. Fun passes through; Lam compiles."""
+    if isinstance(f, Fun):
+        return f
+    return _compile_lam(f, target_space, env)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Pointwise binary operations (addf / subf / mulf)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _binop(op, op_name, stored, arg, env, _fd):
-    """Pointwise binary operation with automatic Fun/Lam broadcasting.
+    """Pointwise binary operation with unified Function broadcasting.
 
-    Fun × Fun   → Fun   (pointwise operation; scalar = constant function covered automatically)
-    Fun × Lam   → Lam   (pushed into Lam body)
-    Lam  × Fun  → Lam
-    Lam  × Lam  → Lam   (pushed when params match)
-    Fun  × Lam  → Fun   (Lam evaluated pointwise then combined with Fun)
-    Lam  × Fun  → Fun
-    Other        → App   (lazy reduction)
+    (Function, Function) with matching Lam params → symbolic push.
+    Otherwise compile Lam → Fun, then pointwise Fun×Fun.
     """
     sv = eval_term(stored, env, _fd)
     av = eval_term(arg, env, _fd)
     match (sv, av):
-        case (Fun() as f, Fun() as g):
-            return Fun(lambda x, _f=f, _g=g: op(_f(x), _g(x)),
+        case (Function() as f, Function() as g):
+            # Symbolic: push into body when both are Lam with same param
+            if isinstance(f, Lam) and isinstance(g, Lam) and f.param == g.param:
+                return Lam(f.param, App(App(Prim(op_name), f.body), g.body))
+            # Cross-boundary or both Fun: compile Lam → Fun, then pointwise
+            f_num = _to_numerical(f, g.space, env)
+            g_num = _to_numerical(g, f.space, env)
+            return Fun(lambda x, _f=f_num, _g=g_num: op(_f(x), _g(x)),
                        space=f.space)
-        case (Lam(p1, b1), Lam(p2, b2)) if p1 == p2:
-            return Lam(p1, App(App(Prim(op_name), b1), b2))
-        # ── Fun/Lam cross-boundary: compile Lam to Fun (interpolation) first, then Fun×Fun ──
-        case (Fun() as f, Lam(p, body)):
-            g = _compile_lam(Lam(p, body), f.space, env)
-            return Fun(lambda x, _f=f, _g=g: op(_f(x), _g(x)), space=f.space)
-        case (Lam(p, body), Fun() as g):
-            f_compiled = _compile_lam(Lam(p, body), g.space, env)
-            return Fun(lambda x, _f=f_compiled, _g=g: op(_f(x), _g(x)), space=g.space)
         case _:
             return App(App(Prim(op_name), sv), av)
 

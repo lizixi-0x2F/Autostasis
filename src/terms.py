@@ -13,6 +13,7 @@ Core design:
   - Pointwise algebraic lifting (addf/subf/mulf) —— vector space operations apply to all inhabitants
 """
 from __future__ import annotations
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
 import math
@@ -22,6 +23,29 @@ import math
 class Term:
     """Every Term can be both operator and operand."""
     pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Function — unified abstract interface for symbolic and numerical functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Function(Term, ABC):
+    """Abstract function — shared interface for symbolic (Lam) and numerical (Fun).
+
+    Subclasses must provide:
+      - space: Space         as a dataclass field
+      - eval_at(x, env)      concrete point evaluation
+    """
+    space: Space  # type annotation — enforced by dataclass field on subclasses
+
+    @abstractmethod
+    def eval_at(self, x: float, env=None) -> float:
+        """Evaluate the function at point x.
+
+        Fun: returns self.fn(x) directly.
+        Lam: beta-reduces App(self, constant(x)) and extracts the float.
+        """
+        ...
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -35,10 +59,24 @@ class Var(Term):
 
 
 @dataclass(frozen=True)
-class Lam(Term):
+class Lam(Function):
     param: str
     body: Term
+    space: Space = field(default=None, compare=False, hash=False)
+    def __post_init__(self):
+        if self.space is None:
+            object.__setattr__(self, "space", SPACE_C0_DEFAULT)
+
     def __repr__(self): return f"(λ{self.param}. {self.body})"
+
+    def eval_at(self, x: float, env=None) -> float:
+        """β-reduce App(self, constant(x)), then extract float."""
+        if env is None:
+            raise ValueError("Lam.eval_at requires env")
+        # Deferred import avoids circular dependency
+        from .eval import eval_term
+        result = eval_term(App(self, Fun(lambda _: x, space=SPACE_R)), env, 0)
+        return _extract_float(result)
 
 
 @dataclass(frozen=True)
@@ -217,7 +255,7 @@ class Space(Term):
         match term:
             case Fun(_, space=Space() as sp):
                 return sp is self or (sp is None)
-            case Lam(_, _):
+            case Function():
                 return self.domain is not None  # Lam is always a function
             case _:
                 return False
@@ -258,7 +296,7 @@ def constant(value: float, space: Space = None) -> "Fun":
 
 
 @dataclass(frozen=True)
-class Fun(Term):
+class Fun(Function):
     """Numeric quantity — a point in vector space.
 
     fn is a Python callable (numerical implementation layer).
@@ -282,6 +320,10 @@ class Fun(Term):
         return f"Fun({dom}{lbl})"
 
     def __call__(self, x):
+        return self.fn(x)
+
+    def eval_at(self, x: float, env=None) -> float:
+        """Direct numerical evaluation — ignores env."""
         return self.fn(x)
 
     def sample(self, n: int = 5) -> str:
@@ -326,21 +368,10 @@ def _fun_l2_distance(f: Term, g: Term, domain: Domain, env=None, n: int = 100) -
 
 
 def _eval_at_point(term: Term, x: float, env) -> float:
-    """Evaluate term at point x.
-
-    Fun (scalar or function): directly call fn(x)
-    Lam (symbolic function): evaluate after beta-reduction
-    """
+    """Evaluate term at point x — dispatches through Function.eval_at."""
     match term:
-        case Fun() as f:       return f(x)
-        case Lam(_, _) as lam:
-            if env is None:
-                raise ValueError("Lam evaluation requires env")
-            # Deferred import to avoid circular dependency
-            from .eval import eval_term
-            # Inject constant function as argument
-            result = eval_term(App(lam, Fun(lambda _: x)), env, 0)
-            return _extract_float(result)
+        case Function() as f:
+            return f.eval_at(x, env)
         case _:
             raise ValueError(f"Cannot evaluate at point: {type(term).__name__}")
 
@@ -348,10 +379,7 @@ def _eval_at_point(term: Term, x: float, env) -> float:
 def space_of(term: Term) -> Space:
     """Get the space of a term."""
     match term:
-        case Fun(_, space=Space() as sp):  return sp
-        case Lam(_, _):
-            # Lam defaults to C0 space
-            return SPACE_C0_DEFAULT
+        case Function() as f:  return f.space
         case _:
             # Other Terms: fall back to R space
             return SPACE_R
