@@ -67,6 +67,31 @@ src/
 
 Requires no dependencies beyond the standard library.
 
+## Arrow — a synthesis compiler (`python -m arrow.main`)
+
+`arrow spec.arr -o out.c`: **examples in, C out.** A real three-phase
+compiler (frontend → synthesis → codegen) built on the Term space:
+
+```
+int f(int x)          # spec
+f(0) = 1
+f(1) = 3
+f(2) = 5
+```
+
+Arrow enumerates terms bottom-up by increasing size; the first term
+consistent with every example is by construction **the shortest one** —
+MDL induction, Occam's razor as a compiler pass. The result is
+decompiled to readable C (Church booleans become `?:`), and gcc takes
+over from there.
+
+Diagnostics follow compiler convention (`arrow: error: file:line: msg`,
+exit 2 = parse error, 1 = synthesis failed, 0 = success).
+
+Next step (the self-referential loop): every synthesized program becomes
+a primitive for the next search — the search language is rewritten by its
+own results, step after step, until the target program is reached.
+
 ## The playground
 
 - **Metacircular evaluator** — implement `eval` *inside* the Term space with
