@@ -1,8 +1,8 @@
 """Syntactic operations: free variables, capture-avoiding substitution."""
 from __future__ import annotations
 import itertools
-from .terms import (Term, Var, Lam, App, Quote, Eval, Fix, Nat, Fun,
-                     Prim, PartialPrim, Cons, Integ, Diff)
+from .terms import (Term, Var, Lam, App, Quote, Eval, Fix, Nat,
+                     Prim, PartialPrim, Cons)
 
 
 def free_vars(term: Term) -> set[str]:
@@ -15,12 +15,7 @@ def free_vars(term: Term) -> set[str]:
         case Fix(f):                 return free_vars(f)
         case Cons(car, cdr):         return free_vars(car) | free_vars(cdr)
         case PartialPrim(_, arg1):   return free_vars(arg1)
-        case Integ(func, a, b):
-            fv = free_vars(func) | free_vars(a)
-            return fv | free_vars(b) if b is not None else fv
-        case Diff(func):             return free_vars(func)
-        case Fun(_, _, _) | Nat(_) | Prim(_):
-            return set()
+        case Nat(_) | Prim(_):       return set()
         case _:                      return set()
 
 
@@ -69,16 +64,7 @@ def substitute(term: Term, var: str, replacement: Term) -> Term:
         case PartialPrim(name, arg1):
             return PartialPrim(name, substitute(arg1, var, replacement))
 
-        case Integ(func, a, b):
-            new_func = substitute(func, var, replacement)
-            new_a = substitute(a, var, replacement)
-            new_b = substitute(b, var, replacement) if b is not None else None
-            return Integ(new_func, new_a, new_b)
-
-        case Diff(func):
-            return Diff(substitute(func, var, replacement))
-
-        case Fun(_, _, _) | Nat(_) | Prim(_):
+        case Nat(_) | Prim(_):
             return term
 
         case _:

@@ -1,123 +1,75 @@
 # Autostasis
 
-A computational model where **self-reference and fixed points are the primitive operations**.
+A computational model where **self-reference and fixed points are the primitive operations** — focused on logic.
 
-Every equation is a functional equation `A[u] = 0`. The transform `T[u] = u - η·A[u]` is canonical. `Fix(T)` is the solution—as a syntactic theorem, not a numerical heuristic.
+The Term space is a λ-calculus with first-class quotation:
 
+| Layer | Terms | Role |
+|-------|-------|------|
+| Computation | `Var`, `Lam`, `App` | λ-calculus |
+| Self-reference | `Quote`, `Eval`, `Fix` | a language that talks about itself |
+| Data | `Nat`, `Cons` | numbers, pairs |
+
+```python
+from src import *
+
+env = make_env()
+term = App(App(Prim("add"), Nat(2)), Nat(3))
+eval_term(term, env)      # → Nat(5)
+
+# fix(f) → f(fix(f)) — Kleene's recursion theorem, as syntax
 ```
-(D, C)u = (f, g)   ->   T   ->   Fix(T)   =   solution
-```
 
-IVP is C taking an initial slice. BVP is C taking boundary slices. PDE is BVP repeated in time. One pipeline.
+## The self-reference primitives
 
-## Quick start
+- `Quote(t)` — reify a term as data. `'t` in the repr.
+- `Eval(q, x)` — execute quoted data: `eval(quote(t), x) → t x`.
+- `Fix(f)` — `fix(f) → f(fix(f))`, Kleene's first recursion theorem.
 
-```bash
-python experiments/ats_solver.py
-```
+These are what make the model a natural home for logic. Self-reference —
+Gödel coding, provability predicates, paradoxes — is usually a chapter of
+painful encoding. Here it is free syntax.
 
-Requires `numpy`. No other dependencies.
+## What lives in the model
+
+- **λ-calculus** with capture-avoiding substitution, WHNF evaluation
+- **Nat arithmetic**: `add`, `sub` (monus), `mult`, `iszero`, `eq`, `eq_nat`
+- **Introspection**: `is_var`, `is_lam`, `get_body`, `get_func`, ... — the
+  language can inspect its own terms (the raw material of a proof checker)
+- **Construction**: `mk_lam`, `mk_app` — build quoted terms at runtime
+- **Combinators**: `Y`, `Z`, Church `True`/`False`
+- **Serialization**: JSON and S-expression round-trips for every term
+
+## Why logic is the natural target
+
+- **Proofs are terms, derivations are reductions.** `App(f, x)` *is* modus
+  ponens (Curry–Howard): `f` proves `A ⊃ B`, `x` proves `A`, the
+  application proves `B`. β-reduction *is* proof normalization
+  (Gentzen's cut elimination).
+- **Paradoxes are divergent terms.** Curry's paradox — `Fix(λc. imp(c, A))`
+  — never reaches WHNF. Divergence is the model's native notion of
+  "no truth value": no three-valued logic needs to be bolted on.
+- **Truth is a fixed point.** Kripke's theory of truth (1975) defines truth
+  as the least fixed point of a monotone operator on truth values — the
+  same engine as solving every equation, now on the space of sentences.
 
 ## Structure
 
 ```
 src/
-  terms.py      -- unified Term space: Var..Fix, Fun, Space, Integ, Diff
-  eval.py       -- WHNF evaluator, numerical backend, flatten_term
-  solve.py      -- T(A, eta) and solve(A, eta) -- 10 lines
-  dsl.py        -- construction sugar: R, add, sub, mul, integ, diff_op
-  ops.py        -- free_vars, capture-avoiding substitution
+  terms.py      -- unified Term space: Var..Fix, Nat, Cons
+  eval.py       -- WHNF evaluator, introspection, default environment
+  ops.py        -- free variables, capture-avoiding substitution
   env.py        -- lexical environment
   combinators.py -- Y, Z, Church booleans
   serialize.py  -- JSON, S-expression round-trips
 ```
 
-## The unified equation
+Requires no dependencies beyond the standard library.
 
-```
-u in X        unknown object
-Du = f        interior law (differential operator)
-Cu = g        exterior constraint (slice operator)
----------------------------------------------------
-(D, C)u = (f, g)
-```
+## First things to try
 
-| C takes | Equation type |
-|---------|---------------|
-| nothing | scalar equation |
-| `u(a)` | IVP |
-| `(u(a), u(b))` | BVP |
-| `(u(a), u(b))` × N_t | PDE (time-dependent) |
-
-## The T-transform
-
-```python
-def T(A, eta=0.1):
-    """T[u] = u - eta * A[u]"""
-    x = Var("x")
-    return Lam("x", sub(x, mul(R(eta), App(A, x))))
-
-def solve(A, eta=0.1):
-    """Fix(T(A, eta)) -- fixed point IS the solution.
-
-    Proof:
-      Fix(T) = T(Fix(T)) = Fix(T) - eta * A(Fix(T))
-      => A(Fix(T)) = 0
-    """
-    return Fix(T(A, eta))
-```
-
-## Demos
-
-| Equation | Type | (D, C) | Fix iters |
-|----------|------|--------|------------|
-| x³ − 2x − 5 = 0 | scalar | (I, ∅) | 9 |
-| x = cos(x) | scalar | (I, ∅) | 45 |
-| y′ = y, y(0)=1 | IVP | (d/dx, eval\|₀) | 11 |
-| −u″ = 1, u(0)=u(1)=0 | BVP | (−d²/dx², eval\|₀₊₁) | 24 |
-| u_t = u_xx, u(x,0)=sin(πx) | PDE (heat) | (−d²/dx², eval\|₀₊₁) × N_t | ~5/step |
-
-### How the PDE works
-
-The heat equation is solved via **implicit Euler time-stepping + Fix per step**:
-
-```
-(I - dt*d^2/dx^2) u^{n+1} = u^n
-```
-
-Using the Green's function `K = (-d^2/dx^2)^{-1}` (same as the BVP case), rewrite as:
-
-```
-u + (1/dt)*K[u] = (1/dt)*K[u^n]
-A[u] = u + alpha*K[u] - alpha*K[u^n] = 0
-```
-
-Then `Fix(T(A))` solves the linear system at each time step. The PDE is just the BVP operator applied repeatedly in time. Same `Integ`, same `T`, same `Fix`.
-
-## Learning is a fixed point
-
-Gradient descent is the same `Fix(T)` engine, on the parameter space `ℝⁿ`:
-
-```
-θ* = Fix(T),   T[θ] = θ − η·A[θ],   A[θ] = ∇_θ L(θ; X, Y)
-```
-
-`Trainer.fit` / `fit_steps` construct the term `Fix(T)` and hand it to
-`eval.fixpoint` — the single convergence engine shared with every equation
-solver (scalar / IVP / BVP / PDE). Parameters are constant vector Funs on
-`SPACE_RN(n)`; the gradient operator is a numerical Fun, and function
-composition `App(A, θ)` is exactly "feed θ into the gradient". No loop owns
-training — the fixed point does.
-
-```python
-model = FunctionModel(lambda p, x: p[0]*x + p[1], n_params=2)
-trainer = Trainer(model, lr=0.1)
-params = trainer.fit(X, Y, epochs=50)      # θ* = Fix(T), one engine
-```
-
-## Design
-
-- **Scalar = constant function on `SPACE_R`**. No `Real` vs `Fun` type split. `addf/subf/mulf` broadcast pointwise over everything.
-- **`Space` is a first-class `Term`** carrying `distance`, `norm`, `zero`. The solver never branches on space type.
-- **`Integ` and `Diff` are Terms**, not Python escape hatches. They can be introspected, substituted, serialized.
-- **Form and value are separated**. `solve()` returns a formal `Fix(T)` term. `show()` evaluates its numerical interpretation. Same solution, different evaluation strategies.
+1. **A quine** — a term that evaluates to itself, via `Quote`/`Eval`.
+2. **Curry's paradox as a term** — `Fix(λc. imp(c, A))`, and watch it diverge.
+3. **A proof checker** — encode natural-deduction trees as `Cons` chains and
+   check them with the introspection primitives.

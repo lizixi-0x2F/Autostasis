@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 from .terms import (Term, Var, Lam, App, Quote, Eval, Fix, Nat, Prim,
-                     PartialPrim, Cons, Integ, Diff)
+                     PartialPrim, Cons)
 
 
 _TAG = "_tag"
@@ -29,12 +29,6 @@ def term_to_json(term: Term):
             return {_TAG: "partial_prim", "name": name, "arg1": term_to_json(arg1)}
         case Cons(car, cdr):
             return {_TAG: "cons", "car": term_to_json(car), "cdr": term_to_json(cdr)}
-        case Integ(func, a, b):
-            d = {_TAG: "integ", "func": term_to_json(func), "a": term_to_json(a)}
-            if b is not None: d["b"] = term_to_json(b)
-            return d
-        case Diff(func):
-            return {_TAG: "diff", "func": term_to_json(func)}
         case _:
             raise TypeError(f"Unknown term type: {type(term)}")
 
@@ -52,10 +46,6 @@ def term_from_json(data):
         case "prim":   return Prim(data["name"])
         case "partial_prim": return PartialPrim(data["name"], term_from_json(data["arg1"]))
         case "cons":   return Cons(term_from_json(data["car"]), term_from_json(data["cdr"]))
-        case "integ":  return Integ(term_from_json(data["func"]),
-                                    term_from_json(data["a"]),
-                                    term_from_json(data["b"]) if "b" in data else None)
-        case "diff":   return Diff(term_from_json(data["func"]))
         case _:
             raise ValueError(f"Unknown tag: {tag}")
 
@@ -83,10 +73,5 @@ def term_to_sexpr(term: Term) -> str:
         case Prim(name):        return f"#{name}"
         case PartialPrim(name, arg1): return f"(#{name} {term_to_sexpr(arg1)})"
         case Cons(car, cdr):    return f"(cons {term_to_sexpr(car)} {term_to_sexpr(cdr)})"
-        case Integ(func, a, b):
-            if b is None: return f"(integ {term_to_sexpr(func)} {term_to_sexpr(a)})"
-            return f"(integ {term_to_sexpr(func)} {term_to_sexpr(a)} {term_to_sexpr(b)})"
-        case Diff(func):
-            return f"(diff {term_to_sexpr(func)})"
         case _:
             raise TypeError(f"Unknown term type: {type(term)}")
