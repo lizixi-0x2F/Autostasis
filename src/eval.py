@@ -68,6 +68,11 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
                     case Prim("lt"):   term = PartialPrim("lt", arg)
                     case Prim("ge"):   term = PartialPrim("ge", arg)
                     case Prim("gt"):   term = PartialPrim("gt", arg)
+                    case Prim("pred"):
+                        av = eval_term(arg, env, _fd)
+                        match av:
+                            case Nat(v): term = Nat(max(0, v - 1))
+                            case _: raise ValueError(f"pred expects Nat, got {av}")
 
                     case PartialPrim("add", stored):
                         sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
@@ -242,6 +247,11 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
                             case _: raise ValueError(f"get_cdr expects quoted Cons")
 
                     # ── Term construction ──
+                    case Prim("mk_nat"):
+                        av = eval_term(arg, env, _fd)
+                        match av:
+                            case Nat(v): term = Quote(Nat(v))
+                            case _: raise ValueError(f"mk_nat expects Nat, got {av}")
                     case Prim("mk_lam"):
                         av = eval_term(arg, env, _fd)
                         match av:
@@ -291,6 +301,7 @@ def default_env() -> Env:
         "div": Prim("div"), "mod": Prim("mod"), "pow": Prim("pow"),
         "min": Prim("min"), "max": Prim("max"),
         "le": Prim("le"), "lt": Prim("lt"), "ge": Prim("ge"), "gt": Prim("gt"),
+        "pred": Prim("pred"),
         "iszero": Prim("iszero"), "eq": Prim("eq"), "eq_nat": Prim("eq_nat"),
         # Cons
         "car": Prim("car"), "cdr": Prim("cdr"),
@@ -304,6 +315,7 @@ def default_env() -> Env:
         "get_eval_arg": Prim("get_eval_arg"), "get_fix_func": Prim("get_fix_func"),
         "get_car": Prim("get_car"), "get_cdr": Prim("get_cdr"),
         # Term construction
+        "mk_nat": Prim("mk_nat"),
         "mk_lam": Prim("mk_lam"), "mk_app": Prim("mk_app"),
         # Combinators
         "Y": Y_COMBINATOR, "Z": Z_COMBINATOR,
