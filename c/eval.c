@@ -1,7 +1,11 @@
-/* eval.c — substitute (capture-avoiding), WHNF evaluator, sexpr printer.
+/* eval.c — closure-based WHNF evaluator.
  *
- * Semantics are a faithful port of src/eval.py + src/ops.py so the two
- * implementations can serve as oracles for each other.
+ * β-reduction binds in the environment instead of copying the tree:
+ * App(λx.b, v) → b under {x ↦ v} ∪ closure env. Lam's WHNF is a
+ * T_CLOSURE carrying the environment it was reached under, so nested
+ * lambdas keep their bindings. Quote is opaque (Lisp semantics): the
+ * quoted tree is data and is never touched by β — this differs from
+ * the retired Python evaluator, whose substitute penetrated Quote.
  */
 #include "term.h"
 #include <stdio.h>
@@ -13,98 +17,6 @@
 static void die(const char *msg) {
     fprintf(stderr, "autostasis: %s\n", msg);
     exit(1);
-}
-
-/* ── free variables (into arena-allocated array) ── */
-typedef struct { const char **names; size_t n, cap; } FvSet;
-
-static void fv_add(Arena *a, FvSet *s, const char *name) {
-    (void)a;
-    for (size_t i = 0; i < s->n; i++)
-        if (s->names[i] == name) return;      /* interned: pointer eq */
-    if (s->n == s->cap) die("free-var set overflow");
-    s->names[s->n++] = name;
-}
-
-static void collect_fv(Term *t, FvSet *s) {
-    switch (t->tag) {
-        case T_VAR: fv_add(NULL, s, t->u.name); break;
-        case T_LAM:
-            collect_fv(t->u.lam.body, s); break;   /* param shadowed: skip below */
-        case T_APP:
-            collect_fv(t->u.app.f, s); collect_fv(t->u.app.a, s); break;
-        case T_QUOTE: collect_fv(t->u.inner, s); break;
-        case T_EVAL:
-            collect_fv(t->u.ev.q, s); collect_fv(t->u.ev.a, s); break;
-        case T_FIX: collect_fv(t->u.func, s); break;
-        case T_PARTIAL: collect_fv(t->u.partial.a1, s); break;
-        case T_CONS:
-            collect_fv(t->u.cons.car, s); collect_fv(t->u.cons.cdr, s); break;
-        default: break;
-    }
-}
-
-static int fv_contains(FvSet *s, const char *name) {
-    for (size_t i = 0; i < s->n; i++)
-        if (s->names[i] == name) return 1;
-    return 0;
-}
-
-static long fresh_counter = 0;
-
-static const char *fresh_var(FvSet *avoid, const char *prefix) {
-    char buf[64];
-    long start = fresh_counter++;
-    for (long k = start;; k++) {
-        snprintf(buf, sizeof buf, "%s%ld", prefix, k);
-        const char *nm = intern(buf);
-        if (!fv_contains(avoid, nm)) return nm;
-    }
-}
-
-/* ── capture-avoiding substitution ── */
-Term *substitute(Arena *a, Term *t, const char *var, Term *repl) {
-    switch (t->tag) {
-        case T_VAR:
-            return t->u.name == var ? repl : t;
-        case T_LAM: {
-            const char *param = t->u.lam.param;
-            if (param == var) return t;
-            const char *rv_names[64];
-            FvSet rv = {rv_names, 0, 64};
-            collect_fv(repl, &rv);
-            if (!fv_contains(&rv, param))
-                return t_lam(a, param, substitute(a, t->u.lam.body, var, repl));
-            /* capture: rename the binder */
-            const char *bv_names[128];
-            FvSet bv = {bv_names, 0, 128};
-            collect_fv(t->u.lam.body, &bv);
-            for (size_t i = 0; i < rv.n; i++)
-                if (!fv_contains(&bv, rv.names[i]))
-                    bv.names[bv.n++] = rv.names[i];
-            const char *np = fresh_var(&bv, param);
-            Term *nb = substitute(a, t->u.lam.body, param, t_var(a, np));
-            return t_lam(a, np, substitute(a, nb, var, repl));
-        }
-        case T_APP:
-            return t_app(a, substitute(a, t->u.app.f, var, repl),
-                            substitute(a, t->u.app.a, var, repl));
-        case T_QUOTE:
-            return t_quote(a, substitute(a, t->u.inner, var, repl));
-        case T_EVAL:
-            return t_eval(a, substitute(a, t->u.ev.q, var, repl),
-                             substitute(a, t->u.ev.a, var, repl));
-        case T_FIX:
-            return t_fix(a, substitute(a, t->u.func, var, repl));
-        case T_PARTIAL:
-            return t_partial(a, t->u.partial.name,
-                             substitute(a, t->u.partial.a1, var, repl));
-        case T_CONS:
-            return t_cons(a, substitute(a, t->u.cons.car, var, repl),
-                             substitute(a, t->u.cons.cdr, var, repl));
-        default:
-            return t;
-    }
 }
 
 /* ── environment ── */
@@ -130,7 +42,7 @@ static int prim_partial(const char *nm) {
         || nm == intern("mk_app");
 }
 
-/* ── evaluator: WHNF, faithful port of src/eval.py ── */
+/* ── evaluator: WHNF, closure semantics ── */
 Term *eval_term(Arena *a, Term *term, Env *env, int fd) {
     while (1) {
         switch (term->tag) {
@@ -138,19 +50,45 @@ Term *eval_term(Arena *a, Term *term, Env *env, int fd) {
                 term = env_lookup(env, term->u.name);
                 break;
 
-            case T_LAM: case T_NAT: case T_QUOTE:
+            case T_THUNK: {
+                /* frozen argument: evaluate under its defining environment */
+                Env *e = term->u.thunk.env;
+                term = term->u.thunk.term;
+                env = e;
+                break;
+            }
+
+            case T_LAM:
+                return t_closure(a, term, env);   /* capture the env */
+
+            case T_NAT: case T_QUOTE:
             case T_PARTIAL: case T_CONS:
                 return term;
 
             case T_APP: {
                 Term *fval = eval_term(a, term->u.app.f, env, fd);
                 Term *arg  = term->u.app.a;
-                switch (fval->tag) {
-                    case T_LAM:
-                        term = substitute(a, fval->u.lam.body,
-                                          fval->u.lam.param, arg);
-                        break;
 
+                if (fval->tag == T_CLOSURE) {
+                    /* β without copying: one env node, zero tree rebuild.
+                       The arg is frozen as a thunk under the defining env
+                       (call-by-name); WHNF-safe literals pass bare. Fix
+                       passes bare: it must expand under the USE-site env
+                       (Python substitute never enters the replacement, so
+                       free vars in a Fix resolve at use). */
+                    Env *e = a_alloc(a, sizeof(Env));
+                    e->name = fval->u.closure.lam->u.lam.param;
+                    e->val = (arg->tag == T_NAT || arg->tag == T_PRIM
+                              || arg->tag == T_FIX)
+                                 ? arg
+                                 : t_thunk(a, arg, fval->u.closure.env);
+                    e->parent = fval->u.closure.env;
+                    env = e;
+                    term = fval->u.closure.lam->u.lam.body;
+                    break;
+                }
+
+                switch (fval->tag) {
                     case T_PRIM: {
                         const char *nm = fval->u.name;
                         Term *av;
@@ -311,13 +249,11 @@ Term *eval_term(Arena *a, Term *term, Env *env, int fd) {
                         break;
                     }
 
-                    case T_FIX: {
-                        if (fd >= MAX_FIX) die("Fix expansion exceeded limit");
-                        Term *fx = t_fix(a, fval->u.func);
-                        term = t_app(a, fval->u.func, fx);
-                        fd++;
+                    case T_FIX:
+                        /* unreachable: a bare Fix never survives eval_term
+                           of a func position (top-level case expands it) */
+                        die("internal: Fix in func position");
                         break;
-                    }
 
                     default:
                         return t_app(a, fval, arg);   /* stuck */
@@ -342,13 +278,16 @@ Term *eval_term(Arena *a, Term *term, Env *env, int fd) {
                 break;
             }
 
+            case T_CLOSURE:
+                return term;   /* already WHNF */
+
             default:
                 return term;
         }
     }
 }
 
-/* ── sexpr printing (term_to_sexpr port) ── */
+/* ── sexpr printing (closures print as their lam) ── */
 void print_term(Term *t) {
     switch (t->tag) {
         case T_VAR: printf("%s", t->u.name); break;
@@ -394,6 +333,12 @@ void print_term(Term *t) {
             printf(" ");
             print_term(t->u.cons.cdr);
             printf(")");
+            break;
+        case T_CLOSURE:
+            print_term(t->u.closure.lam);
+            break;
+        case T_THUNK:
+            print_term(t->u.thunk.term);
             break;
     }
 }

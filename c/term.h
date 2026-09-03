@@ -24,10 +24,11 @@ void *a_alloc(Arena *a, size_t sz);
 /* ── tags ── */
 typedef enum {
     T_VAR, T_LAM, T_APP, T_QUOTE, T_EVAL, T_FIX,
-    T_NAT, T_PRIM, T_PARTIAL, T_CONS
+    T_NAT, T_PRIM, T_PARTIAL, T_CONS, T_CLOSURE, T_THUNK
 } Tag;
 
 typedef struct Term Term;
+typedef struct Env Env;
 
 struct Term {
     Tag tag;
@@ -41,6 +42,8 @@ struct Term {
         long n;                                  /* T_NAT */
         struct { const char *name; Term *a1; } partial;
         struct { Term *car; Term *cdr; } cons;
+        struct { Term *lam; Env *env; } closure; /* T_CLOSURE: WHNF of Lam */
+        struct { Term *term; Env *env; } thunk;  /* T_THUNK: frozen arg */
     } u;
 };
 
@@ -55,15 +58,16 @@ Term *t_nat(Arena *a, long n);
 Term *t_prim(Arena *a, const char *name);
 Term *t_partial(Arena *a, const char *name, Term *a1);
 Term *t_cons(Arena *a, Term *car, Term *cdr);
+Term *t_closure(Arena *a, Term *lam, Env *env);
+Term *t_thunk(Arena *a, Term *term, Env *env);
 
 /* symbol interning: same string -> same pointer forever */
 const char *intern(const char *s);
 
 /* lexical environment: chained name/value bindings */
-typedef struct Env { const char *name; Term *val; struct Env *parent; } Env;
+struct Env { const char *name; Term *val; Env *parent; };
 
 /* core operations */
-Term *substitute(Arena *a, Term *t, const char *var, Term *repl);
 Term *eval_term(Arena *a, Term *t, Env *env, int fd);
 void print_term(Term *t);          /* s-expression to stdout */
 int term_equal(Term *x, Term *y);  /* structural equality (==) */

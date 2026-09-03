@@ -95,6 +95,16 @@ Term *t_cons(Arena *a, Term *car, Term *cdr) {
     t->tag = T_CONS; t->u.cons.car = car; t->u.cons.cdr = cdr;
     return t;
 }
+Term *t_closure(Arena *a, Term *lam, Env *env) {
+    Term *t = a_alloc(a, sizeof(Term));
+    t->tag = T_CLOSURE; t->u.closure.lam = lam; t->u.closure.env = env;
+    return t;
+}
+Term *t_thunk(Arena *a, Term *term, Env *env) {
+    Term *t = a_alloc(a, sizeof(Term));
+    t->tag = T_THUNK; t->u.thunk.term = term; t->u.thunk.env = env;
+    return t;
+}
 
 /* ── Church booleans as global unique pointers ── */
 static Term _true_lam, _false_lam;
@@ -139,6 +149,8 @@ int term_equal(Term *x, Term *y) {
                              && term_equal(x->u.partial.a1, y->u.partial.a1);
         case T_CONS: return term_equal(x->u.cons.car, y->u.cons.car)
                           && term_equal(x->u.cons.cdr, y->u.cons.cdr);
+        case T_CLOSURE: return term_equal(x->u.closure.lam, y->u.closure.lam);
+        case T_THUNK: return term_equal(x->u.thunk.term, y->u.thunk.term);
     }
     return 0;
 }

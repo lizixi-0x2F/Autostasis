@@ -34,10 +34,12 @@ make          # gcc -O2
 ```
 
 ```
-c/term.h      -- Tagged union on an arena: Var..Fix, Nat, Cons, prims
+c/term.h      -- Tagged union on an arena: Var..Fix, Nat, Cons, prims,
+                 closures, thunks
 c/term.c      -- constructors, symbol interning, structural equality
-c/eval.c      -- WHNF evaluator: capture-avoiding substitute, prims,
-                 introspection, construction, Fix expansion (MAX_FIX guard)
+c/eval.c      -- closure-based WHNF evaluator: β binds in the environment
+                 (zero tree copying), call-by-name thunks freeze arguments,
+                 prims, introspection, construction, Fix expansion
 c/main.c      -- benchmarks + fixed cases
 ```
 
@@ -46,23 +48,31 @@ per-node malloc). Variable and prim names are **interned** — name
 comparison is pointer comparison. Sharing is real: two pointers to one
 node are one structure.
 
-Faithful semantics: capture-avoiding substitution (quote-penetrating),
-lazy WHNF, divergence guarded by MAX_FIX. Divergence is the model's
+**Closure semantics.** β-reduction binds in the environment instead of
+rewriting the tree: `App(λx.b, v)` allocates one env node `{x ↦ v}` and
+continues under `b` — the retired substitute-based evaluator copied the
+whole body at every β. Arguments are frozen as **thunks** under their
+defining environment (call-by-name); `Fix` values pass bare and expand
+under the use-site environment. **Quote is opaque** (Lisp semantics): the
+quoted tree is data and β never touches it — `(λx. 'x) 5 → 'x`.
+
+Lazy WHNF; divergence is guarded by MAX_FIX. Divergence is the model's
 native notion of "no truth value" — a term that never reaches WHNF is a
 term with no value, not an error to be caught.
 
 Benchmarks (WSL, gcc -O2):
 
 ```
-fib(15)            0.004s   (the old Python evaluator: 0.148s)
-fib(25)            3.8s     (Python: prohibitive)
-arith chain 20 000 0.17s
+fib(15)            0.003s   (the retired Python evaluator: 0.148s)
+fib(20)            0.030s
+fib(25)            0.39s    (Python: prohibitive)
+arith chain 20 000 0.012s
 ```
 
-The first C version was checked against the Python evaluator as an
-oracle: 22 fixed cases (arith, monus, div-by-zero, Church booleans,
-Quote/Eval, introspection, construction, Cons, Fix-recursion) were
-byte-identical in s-expression output. The Python `src/` then retired.
+The C evaluator was checked against the Python evaluator as an oracle:
+22 fixed cases (arith, monus, div-by-zero, Church booleans, Quote/Eval,
+introspection, construction, Cons, Fix-recursion) were byte-identical in
+s-expression output. The Python `src/` then retired.
 
 ## What lives in the model
 

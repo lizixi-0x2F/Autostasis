@@ -123,6 +123,13 @@ int main(void) {
         Term *lst = t_cons(&ar, one, t_cons(&ar, two, zero));
         CASE("car_cons", deep(&ar, t_app(&ar, t_prim(&ar, "car"), lst), env));
         CASE("cdr_cons", deep(&ar, t_app(&ar, t_prim(&ar, "cdr"), lst), env));
+        /* closure semantics: nested lambda keeps outer binding */
+        Term *addxy = t_app(&ar, t_app(&ar, t_prim(&ar, "add"), t_var(&ar, "x")), t_var(&ar, "y"));
+        Term *nested_lam = t_app(&ar, t_app(&ar, t_lam(&ar, "x", t_lam(&ar, "y", addxy)), two), three);
+        CASE("closure_nested", deep(&ar, nested_lam, env));
+        /* quote is opaque: β does not touch the quoted tree */
+        Term *qx = t_app(&ar, t_lam(&ar, "x", t_quote(&ar, t_var(&ar, "x"))), five);
+        CASE("quote_opaque", deep(&ar, qx, env));
         /* fib(10) via Fix */
         CASE("fib10", deep(&ar, t_app(&ar, build_fib(&ar), ten), env));
     }

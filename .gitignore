@@ -7,6 +7,9 @@ build/
 .ipynb_checkpoints/
 CLAUDE.md
 .claude/
+*.o
+c/autostasis
+c/autostasis_g
 # LaTeX intermediate files
 paper/*.aux
 paper/*.bbl
