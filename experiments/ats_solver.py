@@ -14,8 +14,8 @@ BVP  = C takes boundary slice
 import sys, os, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from src.terms import Var, Lam, App, Prim, Fun, SPACE_C0, space_of
-from src.eval import eval_term, make_env, flatten_term
+from src.terms import Var, Lam, App, Prim, Fun, Fix, SPACE_C0, space_of
+from src.eval import make_env, fixpoint
 from src.dsl import R, add, sub, mul, pow_, integ
 from src.solve import solve
 
@@ -25,42 +25,37 @@ from src.solve import solve
 # =====================================================================
 
 def show(sol, x0, *, precision=1e-8, max_iter=200, label="solve"):
-    """Numerical port: Fix(T) + x0 -> iterate until convergence."""
-    from src.terms import Fix
+    """Numerical port: Fix(T) + x0 -> iterate until convergence.
+
+    The loop lives in eval.fixpoint — show() is only the display shell.
+    """
     match sol:
-        case Fix(T): pass
+        case Fix(_): pass
         case _: raise ValueError("sol must be Fix(T)")
 
     env = make_env()
     sp = space_of(x0)
-    x = x0
 
     print(f"\n{'-' * 40}")
     print(f"  {label}")
     print(f"  space: {sp}")
     if sp.domain is not None:
-        print(f"  init:  {x.sample()}")
+        print(f"  init:  {x0.sample()}")
     else:
-        print(f"  init:  x0 = {x}")
+        print(f"  init:  x0 = {x0}")
     print(f"  {'iter':>4s}  {'|delta|':>14s}")
 
-    for i in range(max_iter):
-        result = eval_term(App(T, x), env)
-        x_new = flatten_term(result, sp)
-        change = sp.distance(x_new, x, env)
-
+    def on_iter(i, x_old, x_new, change):
         if i < 5 or change < precision * 100 or i % 50 == 0:
             print(f"  {i:>4d}  {change:>14.4e}")
-
-        if math.isnan(change) or math.isinf(change):
-            print(f"  X diverged"); return None
         if change < precision:
             print(f"  V converged at iter {i + 1}")
-            return x_new
-        x = x_new
 
-    print(f"  ! max_iter={max_iter} reached")
-    return x
+    result = fixpoint(sol, x0, tol=precision, max_iter=max_iter, env=env,
+                      on_iter=on_iter)
+    if result is None:
+        print(f"  X diverged")
+    return result
 
 
 # =====================================================================

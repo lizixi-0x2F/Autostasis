@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
 import math
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -229,12 +230,18 @@ class Space(Term):
         """Distance between two points in the space.
 
         R:   |a - b|
+        R^n: ||a - b||_2  (vectors live as constant Funs)
         C0:  (int|f-g|^2)^(1/2)  [L2 norm]
         C1:  (int|f-g|^2 + int|f'-g'|^2)^(1/2)  [H1 norm]
         """
         if self.dim is not None and self.domain is None:
-            # Finite-dimensional Euclidean space (R, R^n) — scalar = constant function, take its value at any point
-            return abs(_extract_float(f) - _extract_float(g))
+            # Finite-dimensional Euclidean space (R, R^n) — take the value at any point
+            a = f(0) if isinstance(f, Fun) else _extract_float(f)
+            b = g(0) if isinstance(g, Fun) else _extract_float(g)
+            if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+                return float(np.linalg.norm(np.asarray(a, dtype=float)
+                                            - np.asarray(b, dtype=float)))
+            return abs(float(a) - float(b))
         else:
             # Function space
             return _fun_l2_distance(f, g, self.domain, env, n)
@@ -246,6 +253,8 @@ class Space(Term):
     def zero(self) -> Term:
         """Zero element of the space."""
         if self.dim is not None and self.domain is None:
+            if self.dim > 1:
+                return Fun(lambda _, d=self.dim: np.zeros(d), space=self)
             return Fun(lambda _: 0.0, space=self)
         else:
             return Fun(lambda x: 0.0, space=self)
@@ -265,6 +274,15 @@ class Space(Term):
 
 SPACE_R = Space("ℝ", dim=1)
 """Real line — 1-dimensional Euclidean space"""
+
+
+def SPACE_RN(n: int) -> Space:
+    """Finite-dimensional Euclidean space R^n.
+
+    A vector in R^n is represented as a constant Fun whose value at any
+    point is the np.ndarray vector. Distance is the Euclidean norm.
+    """
+    return Space("ℝⁿ", dim=n)
 
 
 def SPACE_C0(a: float = 0.0, b: float = 1.0) -> Space:

@@ -11,7 +11,8 @@ import math
 import numpy as np
 from .terms import (Term, Var, Lam, App, Quote, Eval, Fix, Nat, Domain, Fun,
                      Function,
-                     Prim, PartialPrim, Cons, Integ, Diff, Space, SPACE_R, SPACE_C0)
+                     Prim, PartialPrim, Cons, Integ, Diff, Space, SPACE_R,
+                     SPACE_C0, space_of)
 from .env import Env
 from .ops import substitute
 from .combinators import Y_COMBINATOR, Z_COMBINATOR, TRUE, FALSE
@@ -598,16 +599,59 @@ def make_env() -> Env:
 def flatten_term(term: Term, sp: Space, n: int = 100) -> Fun:
     """Compile any Term into a flat Fun without closure chains.
 
-    Scalar space: extract numeric value, return constant function.
-    Function space: sample over domain → np.interp interpolation.
-    This is the infrastructure for numerical evaluation — the bridge from symbolic Term to numerical Fun.
+    Scalar/vector space: extract the value at any point (float or np.ndarray),
+    return constant function. Function space: sample over domain → np.interp
+    interpolation. This is the infrastructure for numerical evaluation — the
+    bridge from symbolic Term to numerical Fun.
     """
     if sp.domain is None:
-        return Fun(lambda _, v=_extract_float(term): v, space=sp)
+        match term:
+            case Fun() as f:
+                return Fun(lambda _, v=f(0): v, space=sp)
+            case _:
+                return Fun(lambda _, v=_extract_float(term): v, space=sp)
     xs = np.linspace(sp.domain.a, sp.domain.b, n)
     ys = np.array([float(term(x)) for x in xs])
     return Fun(lambda x, _xs=xs, _ys=ys: float(np.interp(x, _xs, _ys)),
                space=Space("C⁰", domain=sp.domain))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fixed-point evaluation — the numerical interpretation of Fix(f)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fixpoint(sol: Fix, x0: Term, *, tol: float = 1e-8, max_iter: int = 200,
+             env: Env | None = None, on_iter=None) -> Term | None:
+    """Numerical interpretation of Fix(f): iterate x ← f(x) until convergence.
+
+    This is THE convergence engine for the whole system — equation solving
+    (scalar/IVP/BVP/PDE) and learning (Trainer.fit) both reduce to it.
+
+      sol : Fix(f) — the fixed-point certificate
+      x0  : initial inhabitant (Fun) in the solution space
+      tol : stop when space-distance(x_new, x) < tol
+      on_iter : optional callback on_iter(i, x_old, x_new, change)
+
+    Returns the converged Term, or None if the iteration diverged (NaN/Inf).
+    """
+    if not isinstance(sol, Fix):
+        raise ValueError("sol must be Fix(f)")
+    if env is None:
+        env = make_env()
+    f = sol.func
+    sp = space_of(x0)
+    x = x0
+    for i in range(max_iter):
+        x_new = flatten_term(eval_term(App(f, x), env), sp)
+        change = sp.distance(x_new, x, env)
+        if on_iter is not None:
+            on_iter(i, x, x_new, change)
+        if math.isnan(change) or math.isinf(change):
+            return None
+        if change < tol:
+            return x_new
+        x = x_new
+    return x
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

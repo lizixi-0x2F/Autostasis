@@ -94,6 +94,27 @@ A[u] = u + alpha*K[u] - alpha*K[u^n] = 0
 
 Then `Fix(T(A))` solves the linear system at each time step. The PDE is just the BVP operator applied repeatedly in time. Same `Integ`, same `T`, same `Fix`.
 
+## Learning is a fixed point
+
+Gradient descent is the same `Fix(T)` engine, on the parameter space `ℝⁿ`:
+
+```
+θ* = Fix(T),   T[θ] = θ − η·A[θ],   A[θ] = ∇_θ L(θ; X, Y)
+```
+
+`Trainer.fit` / `fit_steps` construct the term `Fix(T)` and hand it to
+`eval.fixpoint` — the single convergence engine shared with every equation
+solver (scalar / IVP / BVP / PDE). Parameters are constant vector Funs on
+`SPACE_RN(n)`; the gradient operator is a numerical Fun, and function
+composition `App(A, θ)` is exactly "feed θ into the gradient". No loop owns
+training — the fixed point does.
+
+```python
+model = FunctionModel(lambda p, x: p[0]*x + p[1], n_params=2)
+trainer = Trainer(model, lr=0.1)
+params = trainer.fit(X, Y, epochs=50)      # θ* = Fix(T), one engine
+```
+
 ## Design
 
 - **Scalar = constant function on `SPACE_R`**. No `Real` vs `Fun` type split. `addf/subf/mulf` broadcast pointwise over everything.
