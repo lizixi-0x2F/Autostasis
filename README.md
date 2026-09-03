@@ -67,41 +67,6 @@ src/
 
 Requires no dependencies beyond the standard library.
 
-## Arrow — a synthesis compiler (`python -m arrow.main`)
-
-`arrow spec.arr -o out.c`: **examples in, C out.** A real three-phase
-compiler (frontend → predict-correct loop → codegen) built on the Term
-space:
-
-```
-int f(int x)          # spec — examples, revealed in order
-f(0) = 7
-f(1) = 9
-f(2) = 11
-```
-
-Arrow's core behavior is a **predict-correct loop**: it keeps a single
-hypothesis (the shortest program consistent with everything seen so far),
-predicts the next output directly, and on mismatch corrects itself by
-resynthesis. The program's next shape is causally determined by its own
-previous prediction failures — self-reference as correction, not voting:
-
-```
-arrow: saw f(0) = 7; hypothesis: 7 (size 1)
-arrow: predict f(1) = 7 ... actual 9 — MISMATCH
-arrow: corrected hypothesis: (((#iszero x) 7) 9) (size 7)
-arrow: predict f(2) = 9 ... actual 11 — MISMATCH
-arrow: corrected hypothesis: ((#add x) ((#add x) 7)) (size 9)
-arrow: predict f(3) = 13 ... actual 13 — hit
-```
-
-The final program is the shortest consistent with every example (MDL
-induction), decompiled to readable C (Church booleans become `?:`, monus
-becomes saturating subtraction), and gcc takes over from there.
-
-Diagnostics follow compiler convention (`arrow: error: file:line: msg`,
-exit 2 = parse error, 1 = synthesis failed, 0 = success).
-
 ## The playground
 
 - **Metacircular evaluator** — implement `eval` *inside* the Term space with
