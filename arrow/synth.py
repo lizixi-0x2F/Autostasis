@@ -30,6 +30,13 @@ def iszero(t):      return App(Prim("iszero"), t)
 def eq_nat(t1, t2): return App(App(Prim("eq_nat"), t1), t2)
 def if_(b, t, e):   return App(App(b, t), e)
 
+# Full primitive spectrum: every binary nat op and every comparison
+# the evaluator knows. Behavioral-signature pruning collapses
+# observationally equal terms (commutativity, constant folding) — the
+# shortest representative survives automatically.
+NAT_BINOPS = ["add", "sub", "mult", "div", "mod", "pow", "min", "max"]
+BOOL_BINOPS = ["eq_nat", "le", "lt", "ge", "gt"]
+
 
 def size(t) -> int:
     match t:
@@ -124,18 +131,21 @@ def synthesize(examples: list[tuple[int, int]], max_size: int = 12,
             for t1 in nat_by_size.get(s1, []):
                 searched += 1
                 add_bool(iszero(t1), s, sig_bool(iszero(t1)))
-        # binary ops
+        # binary ops (nat->nat and nat->bool): size = 3 + s1 + s2
         for s1 in range(1, s - 2):
             s2 = s - 3 - s1
             if s2 < 1:
                 continue
             for t1 in nat_by_size.get(s1, []):
                 for t2 in nat_by_size.get(s2, []):
-                    searched += 1
-                    add_nat(add(t1, t2), s, sig_nat(add(t1, t2)))
-                    add_nat(sub(t1, t2), s, sig_nat(sub(t1, t2)))
-                    add_nat(mult(t1, t2), s, sig_nat(mult(t1, t2)))
-                    add_bool(eq_nat(t1, t2), s, sig_bool(eq_nat(t1, t2)))
+                    for op in NAT_BINOPS:
+                        searched += 1
+                        term = App(App(Prim(op), t1), t2)
+                        add_nat(term, s, sig_nat(term))
+                    for op in BOOL_BINOPS:
+                        searched += 1
+                        term = App(App(Prim(op), t1), t2)
+                        add_bool(term, s, sig_bool(term))
         # if-then-else
         for sb in range(1, s - 2):
             for st in range(1, s - 1 - sb):

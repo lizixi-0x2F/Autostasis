@@ -59,6 +59,15 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
                     case Prim("add"):  term = PartialPrim("add", arg)
                     case Prim("sub"):  term = PartialPrim("sub", arg)
                     case Prim("mult"): term = PartialPrim("mult", arg)
+                    case Prim("div"):  term = PartialPrim("div", arg)
+                    case Prim("mod"):  term = PartialPrim("mod", arg)
+                    case Prim("pow"):  term = PartialPrim("pow", arg)
+                    case Prim("min"):  term = PartialPrim("min", arg)
+                    case Prim("max"):  term = PartialPrim("max", arg)
+                    case Prim("le"):   term = PartialPrim("le", arg)
+                    case Prim("lt"):   term = PartialPrim("lt", arg)
+                    case Prim("ge"):   term = PartialPrim("ge", arg)
+                    case Prim("gt"):   term = PartialPrim("gt", arg)
 
                     case PartialPrim("add", stored):
                         sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
@@ -75,6 +84,54 @@ def eval_term(term: Term, env: Env, _fd: int = 0) -> Term:
                         match (sv, av):
                             case (Nat(v1), Nat(v2)): term = Nat(v1 * v2)
                             case _: raise ValueError(f"mult expects (Nat, Nat)")
+                    case PartialPrim("div", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = Nat(v1 // v2 if v2 != 0 else 0)
+                            case _: raise ValueError(f"div expects (Nat, Nat)")
+                    case PartialPrim("mod", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = Nat(v1 % v2 if v2 != 0 else 0)
+                            case _: raise ValueError(f"mod expects (Nat, Nat)")
+                    case PartialPrim("pow", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)):
+                                if v2 > 20:
+                                    raise ValueError("pow exponent too large")
+                                term = Nat(v1 ** v2)
+                            case _: raise ValueError(f"pow expects (Nat, Nat)")
+                    case PartialPrim("min", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = Nat(min(v1, v2))
+                            case _: raise ValueError(f"min expects (Nat, Nat)")
+                    case PartialPrim("max", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = Nat(max(v1, v2))
+                            case _: raise ValueError(f"max expects (Nat, Nat)")
+                    case PartialPrim("le", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = TRUE if v1 <= v2 else FALSE
+                            case _: raise ValueError(f"le expects (Nat, Nat)")
+                    case PartialPrim("lt", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = TRUE if v1 < v2 else FALSE
+                            case _: raise ValueError(f"lt expects (Nat, Nat)")
+                    case PartialPrim("ge", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = TRUE if v1 >= v2 else FALSE
+                            case _: raise ValueError(f"ge expects (Nat, Nat)")
+                    case PartialPrim("gt", stored):
+                        sv, av = eval_term(stored, env, _fd), eval_term(arg, env, _fd)
+                        match (sv, av):
+                            case (Nat(v1), Nat(v2)): term = TRUE if v1 > v2 else FALSE
+                            case _: raise ValueError(f"gt expects (Nat, Nat)")
 
                     # ═══════════════════════════════════════════════════════
                     # Comparison / Cons / introspection / construction
@@ -231,6 +288,9 @@ def default_env() -> Env:
     return Env({
         # Nat arithmetic
         "add": Prim("add"), "sub": Prim("sub"), "mult": Prim("mult"),
+        "div": Prim("div"), "mod": Prim("mod"), "pow": Prim("pow"),
+        "min": Prim("min"), "max": Prim("max"),
+        "le": Prim("le"), "lt": Prim("lt"), "ge": Prim("ge"), "gt": Prim("gt"),
         "iszero": Prim("iszero"), "eq": Prim("eq"), "eq_nat": Prim("eq_nat"),
         # Cons
         "car": Prim("car"), "cdr": Prim("cdr"),
