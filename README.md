@@ -10,19 +10,15 @@ The Term space is a λ-calculus with first-class quotation:
 | Self-reference | `Quote`, `Eval`, `Fix` | a language that talks about itself |
 | Data | `Nat`, `Cons` | numbers, pairs |
 
-```python
-from src import *
-
-env = make_env()
-term = App(App(Prim("add"), Nat(2)), Nat(3))
-eval_term(term, env)      # → Nat(5)
-
-# fix(f) → f(fix(f)) — Kleene's recursion theorem, as syntax
+```c
+/* fix(f) → f(fix(f)) — Kleene's recursion theorem, as syntax */
+Term *fib = t_fix(a, t_lam(a, "self", t_lam(a, "x", body)));
+Term *r = eval_term(a, t_app(a, fib, t_nat(a, 15)), env, 0);  // Nat(610)
 ```
 
 ## The self-reference primitives
 
-- `Quote(t)` — reify a term as data. `'t` in the repr.
+- `Quote(t)` — reify a term as data.
 - `Eval(q, x)` — execute quoted data: `eval(quote(t), x) → t x`.
 - `Fix(f)` — `fix(f) → f(fix(f))`, Kleene's first recursion theorem.
 
@@ -30,15 +26,53 @@ These are what make the model a natural home for logic. Self-reference —
 Gödel coding, provability predicates, paradoxes — is usually a chapter of
 painful encoding. Here it is free syntax.
 
+## The core (C)
+
+```sh
+make          # gcc -O2
+./c/autostasis
+```
+
+```
+c/term.h      -- Tagged union on an arena: Var..Fix, Nat, Cons, prims
+c/term.c      -- constructors, symbol interning, structural equality
+c/eval.c      -- WHNF evaluator: capture-avoiding substitute, prims,
+                 introspection, construction, Fix expansion (MAX_FIX guard)
+c/main.c      -- benchmarks + fixed cases
+```
+
+Terms are a tagged union allocated from a **bump arena** (8 MB blocks, no
+per-node malloc). Variable and prim names are **interned** — name
+comparison is pointer comparison. Sharing is real: two pointers to one
+node are one structure.
+
+Faithful semantics: capture-avoiding substitution (quote-penetrating),
+lazy WHNF, divergence guarded by MAX_FIX. Divergence is the model's
+native notion of "no truth value" — a term that never reaches WHNF is a
+term with no value, not an error to be caught.
+
+Benchmarks (WSL, gcc -O2):
+
+```
+fib(15)            0.004s   (the old Python evaluator: 0.148s)
+fib(25)            3.8s     (Python: prohibitive)
+arith chain 20 000 0.17s
+```
+
+The first C version was checked against the Python evaluator as an
+oracle: 22 fixed cases (arith, monus, div-by-zero, Church booleans,
+Quote/Eval, introspection, construction, Cons, Fix-recursion) were
+byte-identical in s-expression output. The Python `src/` then retired.
+
 ## What lives in the model
 
 - **λ-calculus** with capture-avoiding substitution, WHNF evaluation
-- **Nat arithmetic**: `add`, `sub` (monus), `mult`, `iszero`, `eq`, `eq_nat`
+- **Nat arithmetic**: `add`, `sub` (monus), `mult`, `div`, `mod`, `pow`,
+  `min`, `max`, `pred`, `iszero`, comparisons
 - **Introspection**: `is_var`, `is_lam`, `get_body`, `get_func`, ... — the
   language can inspect its own terms (the raw material of a proof checker)
-- **Construction**: `mk_lam`, `mk_app` — build quoted terms at runtime
-- **Combinators**: `Y`, `Z`, Church `True`/`False`
-- **Serialization**: JSON and S-expression round-trips for every term
+- **Construction**: `mk_nat`, `mk_lam`, `mk_app` — build quoted terms at runtime
+- **Cons** cells: `car`, `cdr` destructuring
 
 ## Why logic is the natural target
 
@@ -52,20 +86,6 @@ painful encoding. Here it is free syntax.
 - **Truth is a fixed point.** Kripke's theory of truth (1975) defines truth
   as the least fixed point of a monotone operator on truth values — the
   same engine as solving every equation, now on the space of sentences.
-
-## Structure
-
-```
-src/
-  terms.py      -- unified Term space: Var..Fix, Nat, Cons
-  eval.py       -- WHNF evaluator, introspection, default environment
-  ops.py        -- free variables, capture-avoiding substitution
-  env.py        -- lexical environment
-  combinators.py -- Y, Z, Church booleans
-  serialize.py  -- JSON, S-expression round-trips
-```
-
-Requires no dependencies beyond the standard library.
 
 ## The playground
 
@@ -86,3 +106,8 @@ Requires no dependencies beyond the standard library.
 - **Internal typechecker** — simply-typed λ as a typing judgment inside
   the model; proofs become typed terms (Curry–Howard, in-model). Then
   watch self-reference bite: quoting one's own type.
+- **Monotone program discovery** — a sequence of examples defines a
+  monotone operator (sew each sample in); its fixed point is the lookup
+  program. Verified: correct-set grows strictly +1 per sample, 120
+  orderings → 1 behavior, a single `Fix` term runs the whole loop
+  (data in, quoted program out).
