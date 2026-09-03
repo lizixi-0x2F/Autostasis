@@ -67,9 +67,22 @@ src/
 
 Requires no dependencies beyond the standard library.
 
-## First things to try
+## The playground
 
-1. **A quine** — a term that evaluates to itself, via `Quote`/`Eval`.
-2. **Curry's paradox as a term** — `Fix(λc. imp(c, A))`, and watch it diverge.
-3. **A proof checker** — encode natural-deduction trees as `Cons` chains and
-   check them with the introspection primitives.
+- **Metacircular evaluator** — implement `eval` *inside* the Term space with
+  `Quote`/`Eval`/introspection. Then ask: do the inner and outer evaluators
+  ever disagree? (reflection, intuitively)
+- **Fix vs Y** — `Fix(f) → f(Fix(f))` shares structure (zero copies); `Y`
+  expands with copying. Two fixed-point economies; count the reduction steps.
+- **Paradox zoo** — one Term per paradox (Curry, Berry via a definability
+  predicate, Grelling), classified by evaluation behavior: divergence is
+  the model's native "no truth value".
+- **Provability predicate** — write `provable(x)` with the introspection
+  primitives and test Löb's conditions D1/D2 live. A predicate that
+  satisfies them yet is unsound is Gödel II, hands-on.
+- **Equational theory of Quote/Eval** — which laws hold? `quote` is
+  injective, `eval(quote(t)) → t`; does the syntax/semantics adjunction
+  have a precise form here?
+- **Internal typechecker** — simply-typed λ as a typing judgment inside
+  the model; proofs become typed terms (Curry–Howard, in-model). Then
+  watch self-reference bite: quoting one's own type.
